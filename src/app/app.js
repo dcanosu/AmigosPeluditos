@@ -1,4 +1,4 @@
-import { authUsers, getInitialState, tabs, tutorTabs } from './data.js';
+import { authUsers, getInitialState, tabs, tutorTabs, vetTabs } from './data.js';
 import { createId, escapeHtml, formatCurrency, formatDate } from './utils.js';
 
 const VETERINARIANS = [
@@ -24,6 +24,7 @@ export function startApp() {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (!raw) return;
       const saved = JSON.parse(raw);
+      state.notifications = saved.notifications || state.notifications;
       state.tutors = saved.tutors || state.tutors;
       state.pets = saved.pets || state.pets;
       state.inventory = saved.inventory || state.inventory;
@@ -37,6 +38,7 @@ export function startApp() {
   function saveStore() {
     try {
       const snapshot = {
+        notifications: state.notifications,
         tutors: state.tutors,
         pets: state.pets,
         inventory: state.inventory,
@@ -74,8 +76,14 @@ export function startApp() {
     return getCurrentUser()?.role === 'tutor';
   }
 
+  function isVeterinarian() {
+    return getCurrentUser()?.role === 'veterinarian';
+  }
+
   function getAccessibleTabs() {
-    return isAdmin() ? tabs : tutorTabs;
+    if (isAdmin()) return tabs;
+    if (isVeterinarian()) return vetTabs;
+    return tutorTabs;
   }
 
   function getCurrentTutorId() {
@@ -109,6 +117,38 @@ export function startApp() {
     };
 
     return `<span class="${className}">${icons[name] || icons.default}</span>`;
+  }
+
+  function getVisibleNotifications() {
+    const currentUser = getCurrentUser();
+
+    if (isAdmin()) {
+      return [...state.notifications].sort((left, right) => new Date(right.createdAt) - new Date(left.createdAt));
+    }
+
+    if (isVeterinarian()) {
+      return state.notifications
+        .filter((notification) => notification.role === 'veterinarian' && notification.target === currentUser?.displayName)
+        .sort((left, right) => new Date(right.createdAt) - new Date(left.createdAt));
+    }
+
+    if (isTutor()) {
+      return state.notifications
+        .filter((notification) => notification.role === 'tutor' && notification.target === currentUser?.tutorId)
+        .sort((left, right) => new Date(right.createdAt) - new Date(left.createdAt));
+    }
+
+    return [];
+  }
+
+  function createNotification(notification) {
+    state.notifications.unshift({
+      id: createId('notification'),
+      createdAt: new Date().toISOString(),
+      read: false,
+      ...notification,
+    });
+    saveStore();
   }
 
   function getTutorAppointments(tutorId = getCurrentTutorId()) {
@@ -260,6 +300,7 @@ export function startApp() {
               <select class="input" name="role" required>
                 <option value="admin">Administrador</option>
                 <option value="tutor">Tutor</option>
+                <option value="veterinarian">Veterinario</option>
               </select>
             </label>
             <label class="field">
@@ -291,13 +332,13 @@ export function startApp() {
           <img class="brand__logo" src="./img/logo.png" alt="Logo de Amigos Peluditos" />
           <div>
             <h1>Amigos Peluditos</h1>
-            <p>${isAdmin() ? 'Panel de administración' : 'Portal de tutor'}</p>
+            <p>${isAdmin() ? 'Portal de administrador' : isVeterinarian() ? 'Portal del veterinario' : 'Portal de tutor'}</p>
           </div>
         </div>
         <div class="topbar__actions">
           <div class="topbar__user">
             <span>${escapeHtml(currentUser?.displayName || 'Usuario')}</span>
-            <small>${isAdmin() ? 'Administrador' : 'Tutor'}</small>
+            <small>${isAdmin() ? 'Administrador' : isVeterinarian() ? 'Veterinario' : 'Tutor'}</small>
           </div>
           <button class="btn btn--secondary" type="button" data-action="logout">
             Salir
@@ -345,20 +386,25 @@ export function startApp() {
       }
     }
 
+    if (isVeterinarian()) {
+      return renderVeterinarianTab();
+    }
+
     switch (state.activeTab) {
       case 'patients':
         return renderPatientsTab();
       case 'appointments':
         return renderAppointmentsTab();
+      case 'notifications':
+        return renderNotificationsTab();
       case 'history':
         return renderHistoryTab();
       case 'inventory':
         return renderInventoryTab();
       case 'reports':
         return renderReportsTab();
-      case 'dashboard':
       default:
-        return renderDashboardTab();
+        return renderReportsTab();
     }
   }
 
@@ -459,6 +505,39 @@ export function startApp() {
     `;
   }
 
+  function renderVeterinarianTab() {
+    const currentUser = getCurrentUser();
+    const appointments = state.appointments
+      .filter((appointment) => appointment.veterinarian === currentUser?.displayName)
+      .sort((left, right) => {
+        const leftDate = new Date(`${left.date}T${left.time}`);
+        const rightDate = new Date(`${right.date}T${right.time}`);
+        return leftDate - rightDate;
+      });
+
+    return `
+      <section class="stack">
+        <div class="section-hero">
+          <div>
+            <p class="eyebrow">Agenda del veterinario</p>
+            <h2>Mis citas asignadas</h2>
+            <p class="section-hero__copy">Aquí ves únicamente las citas que te fueron asignadas y puedes registrar la consulta.</p>
+          </div>
+          <div class="hero-chip">
+            <span>Citas asignadas</span>
+            <strong>${appointments.length}</strong>
+          </div>
+        </div>
+
+        <section class="panel">
+          <div class="grid grid--cards">
+            ${appointments.length ? appointments.map((appointment) => renderAppointmentCard(appointment)).join('') : '<div class="empty-state">No tienes citas asignadas.</div>'}
+          </div>
+        </section>
+      </section>
+    `;
+  }
+
   function renderDashboardTab() {
     const stats = getStats();
     const recentPets = state.pets.slice(0, 6);
@@ -466,6 +545,11 @@ export function startApp() {
     return `
       <section class="stack">
         <div class="section-hero">
+          <div>
+            <p class="eyebrow">Dashboard</p>
+            <h2>Información general</h2>
+            <p class="section-hero__copy">Resumen rápido de tutores, mascotas, consultas e inventario.</p>
+          </div>
         </div>
 
         <div class="grid grid--stats">
@@ -499,7 +583,7 @@ export function startApp() {
         <div class="panel panel--split">
           <div>
             <p class="eyebrow">Pacientes</p>
-            <h2>Buscar tutor o mascota.</h2>
+            <h2>Buscar tutores y mascotas</h2>
           </div>
           <label class="search">
             <span class="search__label">Buscar</span>
@@ -568,6 +652,38 @@ export function startApp() {
     `;
   }
 
+  function renderNotificationsTab() {
+    const notifications = getVisibleNotifications();
+
+    return `
+      <section class="stack">
+        <div class="section-hero">
+          <div>
+            <p class="eyebrow">Notificaciones</p>
+            <h2>Alertas y avisos del sistema</h2>
+            <p class="section-hero__copy">Aquí se registran las citas creadas y los avisos dirigidos a tu perfil.</p>
+          </div>
+          <div class="hero-chip">
+            <span>No leídas</span>
+            <strong>${notifications.filter((notification) => !notification.read).length}</strong>
+          </div>
+        </div>
+
+        <section class="panel">
+          <div class="panel__header">
+            <div>
+              <p class="eyebrow">Bandeja</p>
+              <h3>Mensajes del sistema</h3>
+            </div>
+          </div>
+          <div class="grid grid--cards">
+            ${notifications.length ? notifications.map((notification) => renderNotificationCard(notification)).join('') : '<div class="empty-state">No tienes notificaciones.</div>'}
+          </div>
+        </section>
+      </section>
+    `;
+  }
+
   function renderHistoryTab() {
     const records = [...state.medicalRecords].sort((left, right) => new Date(right.date) - new Date(left.date));
 
@@ -626,16 +742,38 @@ export function startApp() {
     const stats = getStats();
     const speciesBreakdown = Object.entries(getSpeciesBreakdown());
     const pendingAppointments = state.appointments.filter((appointment) => appointment.status !== 'Confirmada').length;
+    const unreadNotifications = getVisibleNotifications().filter((notification) => !notification.read).length;
+    const recentAppointments = state.appointments.filter((appointment) => {
+      const appointmentDate = new Date(appointment.date);
+      const weekAgo = new Date();
+      weekAgo.setDate(weekAgo.getDate() - 7);
+      return appointmentDate >= weekAgo;
+    }).length;
+    const inventoryTotalValue = state.inventory.reduce((sum, item) => sum + item.price * item.quantity, 0);
+    const costByCategory = state.inventory.reduce((accumulator, item) => {
+      accumulator[item.category] = (accumulator[item.category] || 0) + item.price * item.quantity;
+      return accumulator;
+    }, {});
+    const appointmentStatusBreakdown = state.appointments.reduce((accumulator, appointment) => {
+      accumulator[appointment.status] = (accumulator[appointment.status] || 0) + 1;
+      return accumulator;
+    }, {});
+    const appointmentsByVet = state.appointments.reduce((accumulator, appointment) => {
+      accumulator[appointment.veterinarian] = (accumulator[appointment.veterinarian] || 0) + 1;
+      return accumulator;
+    }, {});
 
     return `
       <section class="stack">
-        <div class="panel panel--split">
+        <div class="section-hero">
           <div>
             <p class="eyebrow">Reportes</p>
-            <h2>Lectura rápida de actividad y distribución de pacientes.</h2>
+            <h2>Resumen analítico</h2>
+            <p class="section-hero__copy">Vista rápida con métricas de pacientes, citas, actividad reciente y alertas.</p>
           </div>
-          <div class="mini-note">
-            ${pendingAppointments} citas pendientes
+          <div class="hero-chip">
+            <span>Total inventario</span>
+            <strong>${formatCurrency(inventoryTotalValue)}</strong>
           </div>
         </div>
 
@@ -644,6 +782,8 @@ export function startApp() {
           ${renderStatCard('Mascotas', stats.totalPets, 'Pacientes totales')}
           ${renderStatCard('Consultas', stats.totalRecords, 'Consultas acumuladas')}
           ${renderStatCard('Pendientes', pendingAppointments, 'Citas por confirmar')}
+          ${renderStatCard('Recientes', recentAppointments, 'Citas esta semana')}
+          ${renderStatCard('Alertas', unreadNotifications, 'Notificaciones sin leer')}
         </div>
 
         <section class="panel">
@@ -671,6 +811,91 @@ export function startApp() {
               .join('')}
           </div>
         </section>
+
+        <section class="panel">
+          <div class="panel__header">
+            <div>
+              <p class="eyebrow">Costos</p>
+              <h3>Costos estimados por categoría</h3>
+            </div>
+          </div>
+          <div class="distribution">
+            ${Object.entries(costByCategory)
+              .map(
+                ([category, total]) => `
+                  <div class="distribution__row">
+                    <div>
+                      <strong>${escapeHtml(category)}</strong>
+                      <span>${formatCurrency(total)}</span>
+                    </div>
+                    <div class="distribution__bar">
+                      <div class="distribution__bar-fill" style="width: ${inventoryTotalValue ? Math.max(18, (total / inventoryTotalValue) * 100) : 18}%"></div>
+                    </div>
+                  </div>
+                `,
+              )
+              .join('')}
+          </div>
+        </section>
+
+        <div class="grid grid--stats">
+          ${renderStatCard('Citas agendadas', state.appointments.length, 'Total de citas en el sistema')}
+          ${renderStatCard('Inventario', state.inventory.length, 'Productos activos')}
+          ${renderStatCard('Stock bajo', state.inventory.filter((item) => item.quantity <= 8).length, 'Requiere reposición')}
+          ${renderStatCard('Notificaciones', getVisibleNotifications().length, 'Mensajes disponibles')}
+        </div>
+
+        <section class="panel">
+          <div class="panel__header">
+            <div>
+              <p class="eyebrow">Citas</p>
+              <h3>Estado de las citas</h3>
+            </div>
+          </div>
+          <div class="distribution">
+            ${Object.entries(appointmentStatusBreakdown)
+              .map(
+                ([status, total]) => `
+                  <div class="distribution__row">
+                    <div>
+                      <strong>${escapeHtml(status)}</strong>
+                      <span>${total} citas</span>
+                    </div>
+                    <div class="distribution__bar">
+                      <div class="distribution__bar-fill" style="width: ${Math.max(18, (total / Math.max(1, state.appointments.length)) * 100)}%"></div>
+                    </div>
+                  </div>
+                `,
+              )
+              .join('')}
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel__header">
+            <div>
+              <p class="eyebrow">Actividad</p>
+              <h3>Citas por veterinario</h3>
+            </div>
+          </div>
+          <div class="distribution">
+            ${Object.entries(appointmentsByVet)
+              .map(
+                ([veterinarian, total]) => `
+                  <div class="distribution__row">
+                    <div>
+                      <strong>${escapeHtml(veterinarian)}</strong>
+                      <span>${total} citas</span>
+                    </div>
+                    <div class="distribution__bar">
+                      <div class="distribution__bar-fill" style="width: ${Math.max(18, (total / Math.max(1, state.appointments.length)) * 100)}%"></div>
+                    </div>
+                  </div>
+                `,
+              )
+              .join('')}
+          </div>
+        </section>
       </section>
     `;
   }
@@ -684,6 +909,34 @@ export function startApp() {
         </div>
         <strong>${escapeHtml(value)}</strong>
         <span>${escapeHtml(description)}</span>
+      </article>
+    `;
+  }
+
+  function renderNotificationCard(notification) {
+    return `
+      <article class="card ${notification.read ? 'card--compact' : ''}">
+        <div class="card__header">
+          <div class="card__title">
+            ${renderIcon('bell', 'card__icon')}
+            <div>
+              <p class="card__eyebrow">${escapeHtml(notification.role === 'veterinarian' ? 'Veterinario' : notification.role === 'tutor' ? 'Tutor' : 'Sistema')}</p>
+              <h4>${escapeHtml(notification.title)}</h4>
+            </div>
+          </div>
+          <span class="pill ${notification.read ? 'pill--success' : 'pill--warning'}">
+            ${notification.read ? 'Leída' : 'Nueva'}
+          </span>
+        </div>
+        <div class="card__meta">
+          <span>${escapeHtml(notification.message)}</span>
+          <span>${formatDate(notification.createdAt.slice(0, 10))}</span>
+        </div>
+        <div class="card__actions">
+          <button class="btn btn--secondary" type="button" data-action="toggle-notification-read" data-notification-id="${escapeHtml(notification.id)}">
+            ${notification.read ? 'Marcar como no leída' : 'Marcar como leída'}
+          </button>
+        </div>
       </article>
     `;
   }
@@ -797,6 +1050,9 @@ export function startApp() {
   }
 
   function renderAppointmentCard(appointment) {
+    const currentUser = getCurrentUser();
+    const canRegisterConsultation = isVeterinarian() && appointment.veterinarian === currentUser?.displayName && appointment.status !== 'Atendida';
+
     return `
       <article class="card">
         <div class="card__header">
@@ -816,12 +1072,23 @@ export function startApp() {
           <span>${escapeHtml(appointment.reason)}</span>
           <span>${escapeHtml(appointment.veterinarian)}</span>
         </div>
+        <div class="card__actions card__actions--wrap">
+          <button class="btn btn--secondary" type="button" data-action="open-modal" data-modal-type="appointment-detail" data-appointment-id="${escapeHtml(appointment.id)}">
+            Ver cita
+          </button>
+          ${canRegisterConsultation ? `<button class="btn btn--primary" type="button" data-action="open-modal" data-modal-type="medical" data-appointment-id="${escapeHtml(appointment.id)}" data-pet-id="${escapeHtml(appointment.petId)}" data-pet-name="${escapeHtml(appointment.petName)}" data-veterinarian="${escapeHtml(appointment.veterinarian)}">
+            Registrar consulta
+          </button>` : ''}
+        </div>
       </article>
     `;
   }
 
   function renderMedicalRecordCard(record) {
     const pet = getPetById(record.petId);
+    const nextVisitLabel = record.nextVisit ? formatDate(record.nextVisit) : 'Sin próxima visita';
+    const weightLabel = record.weight !== null && record.weight !== undefined ? `${record.weight} kg` : 'No registrado';
+    const temperatureLabel = record.temperature !== null && record.temperature !== undefined ? `${record.temperature} °C` : 'No registrada';
 
     return `
       <article class="card">
@@ -838,7 +1105,9 @@ export function startApp() {
         <div class="card__meta">
           <span>Diagnóstico: ${escapeHtml(record.diagnosis)}</span>
           <span>Tratamiento: ${escapeHtml(record.treatment)}</span>
-          <span>Próxima visita: ${formatDate(record.nextVisit)}</span>
+          <span>Próxima visita: ${escapeHtml(nextVisitLabel)}</span>
+          <span>Peso: ${escapeHtml(weightLabel)}</span>
+          <span>Temperatura: ${escapeHtml(temperatureLabel)}</span>
           <span>Veterinario: ${escapeHtml(record.veterinarian)}</span>
         </div>
       </article>
@@ -875,6 +1144,9 @@ export function startApp() {
     }
 
     const context = getModalContext();
+    const appointmentContext = context.appointmentId
+      ? state.appointments.find((appointment) => appointment.id === context.appointmentId)
+      : null;
 
     if (state.modal.type === 'history') {
       const pet = getPetById(context.petId);
@@ -921,6 +1193,51 @@ export function startApp() {
       `;
     }
 
+    if (state.modal.type === 'appointment-detail') {
+      const appointment = state.modal.payload?.appointmentId
+        ? state.appointments.find((item) => item.id === state.modal.payload.appointmentId)
+        : null;
+      const pet = appointment ? getPetById(appointment.petId) : null;
+
+      if (!appointment) {
+        return '';
+      }
+
+      return `
+        <div class="modal-overlay" data-action="close-modal">
+          <section class="modal" data-modal-panel>
+            <div class="modal__header">
+              <div>
+                <p class="eyebrow">Detalle de cita</p>
+                <h3>${escapeHtml(appointment.petName)}</h3>
+              </div>
+              <button class="icon-button" type="button" data-action="close-modal">×</button>
+            </div>
+            <div class="stack stack--compact">
+              <div class="card card--compact">
+                <div class="card__meta">
+                  <span>Mascota: ${escapeHtml(appointment.petName)}</span>
+                  <span>Tutor: ${escapeHtml(getTutorById(pet?.tutorId)?.name || 'Desconocido')}</span>
+                  <span>Fecha: ${formatDate(appointment.date)} · ${escapeHtml(appointment.time)}</span>
+                  <span>Motivo: ${escapeHtml(appointment.reason)}</span>
+                  <span>Veterinario: ${escapeHtml(appointment.veterinarian)}</span>
+                  <span>Estado: ${escapeHtml(appointment.status)}</span>
+                </div>
+              </div>
+            </div>
+            <div class="modal__actions">
+              <button class="btn btn--secondary" type="button" data-action="close-modal">Cerrar</button>
+              ${isVeterinarian() && appointment.veterinarian === getCurrentUser()?.displayName && appointment.status !== 'Atendida'
+                ? `<button class="btn btn--primary" type="button" data-action="open-modal" data-modal-type="medical" data-appointment-id="${escapeHtml(appointment.id)}" data-pet-id="${escapeHtml(appointment.petId)}" data-pet-name="${escapeHtml(appointment.petName)}" data-veterinarian="${escapeHtml(appointment.veterinarian)}">
+                    Registrar consulta
+                  </button>`
+                : ''}
+            </div>
+          </section>
+        </div>
+      `;
+    }
+
     const formMap = {
       tutor: {
         title: 'Nuevo tutor',
@@ -955,20 +1272,41 @@ export function startApp() {
       medical: {
         title: 'Nueva consulta',
         submit: 'Guardar consulta',
-        fields: `
-          <div class="modal-context">Paciente seleccionado: <strong>${escapeHtml(context.petName || '')}</strong></div>
-          <div class="form-grid">
-            ${renderInputField('Fecha', 'date', 'date', '', '', true)}
-            ${renderInputField('Tipo', 'type', 'text', '', 'Consulta general')}
-            ${renderInputField('Peso', 'weight', 'number', '', '12.5', false, false, '0.1')}
-            ${renderInputField('Temperatura', 'temperature', 'number', '', '38.2', false, false, '0.1')}
-            ${renderInputField('Veterinario', 'veterinarian', 'text', '', 'Dra. Ana Martínez')}
-            ${renderInputField('Próxima visita', 'nextVisit', 'date', '', '')}
-            ${renderTextareaField('Diagnóstico', 'diagnosis', 'Paciente estable y sin signos de alarma.')}
-            ${renderTextareaField('Tratamiento', 'treatment', 'Tratamiento según evaluación clínica.')}
-            ${renderTextareaField('Observaciones', 'observations', 'Observación adicional del caso.')}
-          </div>
-        `,
+        fields: context.appointmentId && isVeterinarian()
+          ? `
+            <div class="modal-context">
+              <p><strong>Mascota:</strong> ${escapeHtml(context.petName || '')}</p>
+              <p><strong>Fecha de la cita:</strong> ${escapeHtml(appointmentContext?.date ? formatDate(appointmentContext.date) : '')}</p>
+              <p><strong>Hora:</strong> ${escapeHtml(appointmentContext?.time || '')}</p>
+              <p><strong>Motivo:</strong> ${escapeHtml(appointmentContext?.reason || '')}</p>
+              <p><strong>Veterinario:</strong> ${escapeHtml(context.veterinarian || getCurrentUser()?.displayName || '')}</p>
+            </div>
+            <input type="hidden" name="date" value="${escapeHtml(appointmentContext?.date || '')}" />
+            <input type="hidden" name="type" value="${escapeHtml(appointmentContext?.reason || 'Consulta general')}" />
+            <input type="hidden" name="veterinarian" value="${escapeHtml(context.veterinarian || getCurrentUser()?.displayName || '')}" />
+            <input type="hidden" name="weight" value="" />
+            <input type="hidden" name="temperature" value="" />
+            <input type="hidden" name="nextVisit" value="" />
+            <div class="form-grid">
+              ${renderTextareaField('Diagnóstico', 'diagnosis', 'Paciente estable y sin signos de alarma.')}
+              ${renderTextareaField('Tratamiento', 'treatment', 'Tratamiento según evaluación clínica.')}
+              ${renderTextareaField('Observaciones', 'observations', 'Observación adicional del caso.')}
+            </div>
+          `
+          : `
+            <div class="modal-context">Paciente seleccionado: <strong>${escapeHtml(context.petName || '')}</strong></div>
+            <div class="form-grid">
+              ${renderInputField('Fecha', 'date', 'date', '', '', true)}
+              ${renderInputField('Tipo', 'type', 'text', '', 'Consulta general')}
+              ${renderInputField('Peso', 'weight', 'number', '', '12.5', false, false, '0.1')}
+              ${renderInputField('Temperatura', 'temperature', 'number', '', '38.2', false, false, '0.1')}
+              ${renderSelectField('Veterinario', 'veterinarian', VETERINARIANS.map((vet) => ({ value: vet, label: vet, selected: context.veterinarian ? context.veterinarian === vet : vet === getCurrentUser()?.displayName })))}
+              ${renderInputField('Próxima visita', 'nextVisit', 'date', '', '')}
+              ${renderTextareaField('Diagnóstico', 'diagnosis', 'Paciente estable y sin signos de alarma.')}
+              ${renderTextareaField('Tratamiento', 'treatment', 'Tratamiento según evaluación clínica.')}
+              ${renderTextareaField('Observaciones', 'observations', 'Observación adicional del caso.')}
+            </div>
+          `,
       },
       appointment: {
         title: 'Nueva cita',
@@ -1104,7 +1442,7 @@ export function startApp() {
         displayName: user.displayName,
         tutorId: user.tutorId || null,
       };
-      state.activeTab = user.role === 'admin' ? 'dashboard' : 'my-pets';
+      state.activeTab = user.role === 'admin' ? 'reports' : user.role === 'veterinarian' ? 'vet-appointments' : 'my-pets';
       sessionStorage.setItem(sessionKey, JSON.stringify(state.currentUser));
       render();
       return;
@@ -1149,11 +1487,21 @@ export function startApp() {
         diagnosis: values.diagnosis,
         treatment: values.treatment,
         observations: values.observations,
-        nextVisit: values.nextVisit,
-        weight: Number(values.weight),
-        temperature: Number(values.temperature),
+        nextVisit: values.nextVisit || '',
+        weight: values.weight ? Number(values.weight) : null,
+        temperature: values.temperature ? Number(values.temperature) : null,
         veterinarian: values.veterinarian,
       });
+
+      if (state.modal?.payload?.appointmentId) {
+        const appointment = state.appointments.find((item) => item.id === state.modal.payload.appointmentId);
+
+        if (appointment) {
+          appointment.status = 'Atendida';
+          appointment.veterinarian = values.veterinarian;
+        }
+      }
+
       saveStore();
     }
 
@@ -1167,7 +1515,7 @@ export function startApp() {
       }
 
       if (isTutor()) {
-        state.appointments.push({
+        const appointment = {
           id: createId('appointment'),
           tutorId: getCurrentTutorId(),
           petId: pet.id,
@@ -1177,14 +1525,31 @@ export function startApp() {
           reason: values.reason,
           veterinarian: values.veterinarian,
           status: 'Solicitud enviada',
+        };
+
+        state.appointments.push(appointment);
+        createNotification({
+          role: 'tutor',
+          target: getCurrentTutorId(),
+          title: 'Cita solicitada',
+          message: `Tu cita para ${pet.name} fue creada para ${formatDate(values.date)} a las ${values.time}.`,
         });
+
+        createNotification({
+          role: 'veterinarian',
+          target: values.veterinarian,
+          title: 'Nueva cita asignada',
+          message: `Tienes una cita de ${pet.name} para ${formatDate(values.date)} a las ${values.time}.`,
+        });
+
         saveStore();
         closeModal();
         return;
       }
 
-      state.appointments.push({
+      const appointment = {
         id: createId('appointment'),
+        tutorId: pet.tutorId,
         petId: pet.id,
         petName: pet.name,
         date: values.date,
@@ -1192,7 +1557,23 @@ export function startApp() {
         reason: values.reason,
         veterinarian: values.veterinarian,
         status: values.status,
+      };
+
+      state.appointments.push(appointment);
+      createNotification({
+        role: 'tutor',
+        target: pet.tutorId,
+        title: 'Cita creada',
+        message: `Se creó una cita para ${pet.name} el ${formatDate(values.date)} a las ${values.time}.`,
       });
+
+      createNotification({
+        role: 'veterinarian',
+        target: values.veterinarian,
+        title: 'Nueva cita asignada',
+        message: `Se asignó la cita de ${pet.name} para ${formatDate(values.date)} a las ${values.time}.`,
+      });
+
       saveStore();
     }
 
@@ -1239,7 +1620,18 @@ export function startApp() {
     }
 
     if (action === 'switch-tab') {
-      switchTab(actionEl.dataset.tab || 'dashboard');
+      switchTab(actionEl.dataset.tab || 'reports');
+      return;
+    }
+
+    if (action === 'toggle-notification-read') {
+      const notification = state.notifications.find((item) => item.id === actionEl.dataset.notificationId);
+
+      if (notification) {
+        notification.read = !notification.read;
+        saveStore();
+        render();
+      }
       return;
     }
 
