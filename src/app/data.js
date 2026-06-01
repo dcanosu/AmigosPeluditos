@@ -1,8 +1,9 @@
 export function getInitialState() {
   return {
-    activeTab: 'dashboard',
+    activeTab: 'reports',
     searchTerm: '',
     modal: null,
+    notifications: [],
     tutors: [
       {
         id: '1',
@@ -140,7 +141,7 @@ export function getInitialState() {
 }
 
 export const tabs = [
-  { id: 'dashboard', label: 'Dashboard', icon: 'dashboard' },
+  { id: 'notifications', label: 'Notificaciones', icon: 'bell' },
   { id: 'patients', label: 'Gestión de Pacientes', icon: 'users' },
   { id: 'appointments', label: 'Agenda de Citas', icon: 'calendar' },
   { id: 'history', label: 'Historia Clínica', icon: 'file' },
@@ -152,6 +153,12 @@ export const tutorTabs = [
   { id: 'my-pets', label: 'Mis mascotas', icon: 'paw' },
   { id: 'my-history', label: 'Historial clínico', icon: 'file' },
   { id: 'request-appointment', label: 'Solicitar cita', icon: 'calendar-plus' },
+  { id: 'notifications', label: 'Notificaciones', icon: 'bell' },
+];
+
+export const vetTabs = [
+  { id: 'vet-appointments', label: 'Mis citas', icon: 'calendar' },
+  { id: 'notifications', label: 'Notificaciones', icon: 'bell' },
 ];
 
 export const authUsers = [
@@ -174,5 +181,35 @@ export const authUsers = [
     email: 'carlos@email.com',
     password: 'Carlos2026',
     displayName: 'Carlos Rodríguez',
+  },
+  {
+    role: 'veterinarian',
+    email: 'ana.martinez@clinic.com',
+    password: 'Ana2026',
+    displayName: 'Dra. Ana Martínez',
+  },
+  {
+    role: 'veterinarian',
+    email: 'carlos.lopez@clinic.com',
+    password: 'CarlosVet2026',
+    displayName: 'Dr. Carlos López',
+  },
+  {
+    role: 'veterinarian',
+    email: 'laura.torres@clinic.com',
+    password: 'Laura2026',
+    displayName: 'Dra. Laura Torres',
+  },
+  {
+    role: 'veterinarian',
+    email: 'felipe.rojas@clinic.com',
+    password: 'Felipe2026',
+    displayName: 'Dr. Felipe Rojas',
+  },
+  {
+    role: 'veterinarian',
+    email: 'sofia.herrera@clinic.com',
+    password: 'Sofia2026',
+    displayName: 'Dra. Sofía Herrera',
   },
 ];
